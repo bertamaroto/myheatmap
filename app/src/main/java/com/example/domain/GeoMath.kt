@@ -18,7 +18,7 @@ object GeoMath {
         val dLon = Math.toRadians(b.lon - a.lon)
         val sinLat = sin(dLat / 2.0)
         val sinLon = sin(dLon / 2.0)
-        val h = sinLat * sinLat + cos(lat1) * cos(lat2) * sinLon * sinLon
+        val h = (sinLat * sinLat + cos(lat1) * cos(lat2) * sinLon * sinLon).coerceIn(0.0, 1.0)
         return 2.0 * EARTH_RADIUS_M * atan2(sqrt(h), sqrt(1.0 - h))
     }
 
@@ -77,6 +77,22 @@ object GeoMath {
         for (i in 0 until n) {
             if (keep[i]) result.add(points[i])
         }
+        return result
+    }
+
+    /**
+     * Uniformly decimates a point list to at most [maxPoints] for lightweight WebView rendering,
+     * preserving the exact first and last points.
+     */
+    fun decimateForDisplay(points: List<TrackPoint>, maxPoints: Int): List<TrackPoint> {
+        if (maxPoints < 2 || points.size <= maxPoints) return points
+        val result = ArrayList<TrackPoint>(maxPoints)
+        val lastIdx = points.size - 1
+        val step = lastIdx.toDouble() / (maxPoints - 1).toDouble()
+        for (i in 0 until maxPoints - 1) {
+            result.add(points[(i * step).toInt()])
+        }
+        result.add(points[lastIdx])
         return result
     }
 

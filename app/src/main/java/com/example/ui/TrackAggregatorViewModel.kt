@@ -19,10 +19,12 @@ import com.example.domain.SourcePresets
 import com.example.domain.SourceSummary
 import com.example.domain.TileStyle
 import com.example.domain.VisualizationMode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -77,9 +79,10 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
 
     init {
         val db = TrackAggregatorDatabase.getInstance(application)
-        repository = TrackRepository(db.sourceDao(), db.trackDao(), db.settingsDao())
+        val pointsDir = File(application.filesDir, "track_points")
+        repository = TrackRepository(db.sourceDao(), db.trackDao(), db.settingsDao(), pointsDir)
         viewModelScope.launch {
-            repository.ensureInitialized()
+            runCatching { repository.ensureInitialized() }
         }
     }
 
@@ -130,8 +133,10 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
             visibleRawPts += track.rawPointCount
             visibleRenderedPts += pts.size
 
+            val displayPts = GeoMath.decimateForDisplay(pts, MAX_DISPLAY_POINTS_PER_TRACK)
             val ptsArray = JSONArray()
-            for (pt in pts) {
+            for (pt in displayPts) {
+                if (!pt.lat.isFinite() || !pt.lon.isFinite()) continue
                 ptsArray.put(JSONArray().apply {
                     put(pt.lat)
                     put(pt.lon)
@@ -158,6 +163,9 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
             put("fitBoundsNonce", transient.fitBoundsNonce)
             put("tracks", tracksJson)
         }
+        val safePayloadJson = payload.toString()
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029")
 
         MainUiState(
             sources = sources,
@@ -168,7 +176,7 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
             visibleDistanceKm = visibleTracks.sumOf { it.distanceKm },
             totalRawPoints = visibleRawPts,
             totalRenderedPoints = visibleRenderedPts,
-            mapPayloadJson = payload.toString(),
+            mapPayloadJson = safePayloadJson,
             pendingImports = transient.pendingImports,
             isLoading = transient.isLoading,
             snackbarMessage = transient.snackbarMessage,
@@ -178,6 +186,9 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
         )
     }
         .flowOn(Dispatchers.Default)
+        .catch { err ->
+            emit(MainUiState(snackbarMessage = err.localizedMessage ?: "Failed to update map state."))
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -191,22 +202,34 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
             transientState.update { it.copy(isLoading = true) }
             val parsed = mutableListOf<PendingImportTrack>()
             var failedCount = 0
+            var errorDetail: String? = null
 
             withContext(Dispatchers.IO) {
                 val resolver = getApplication<Application>().contentResolver
                 for (uri in uris) {
-                    val fileName = resolveFileName(uri) ?: "track.gpx"
                     try {
-                        resolver.openInputStream(uri)?.use { stream ->
-                            val tracksInFile = GpxXmlParser.parseStream(stream, fileName, currentSources)
+                        val fileName = resolveFileName(uri) ?: "track.gpx"
+                        val stream = resolver.openInputStream(uri)
+                        if (stream == null) {
+                            failedCount++
+                            continue
+                        }
+                        stream.use { input ->
+                            val tracksInFile = GpxXmlParser.parseStream(input, fileName, currentSources)
                             if (tracksInFile.isEmpty()) {
                                 failedCount++
                             } else {
                                 parsed.addAll(tracksInFile)
                             }
-                        } ?: run { failedCount++ }
-                    } catch (_: Exception) {
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
                         failedCount++
+                        if (errorDetail == null) errorDetail = e.localizedMessage
+                    } catch (oom: OutOfMemoryError) {
+                        failedCount++
+                        errorDetail = "File is too large for available memory."
                     }
                 }
             }
@@ -215,10 +238,10 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
                 transientState.update {
                     it.copy(
                         isLoading = false,
-                        snackbarMessage = if (failedCount > 0) {
-                            "No valid GPX track points found in selected files."
-                        } else {
-                            "No GPX files selected."
+                        snackbarMessage = when {
+                            errorDetail != null -> "Could not read GPX file: $errorDetail"
+                            failedCount > 0 -> "No valid GPX track points found in selected files."
+                            else -> "No GPX files selected."
                         }
                     )
                 }
@@ -265,37 +288,50 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
         if (pending.isEmpty()) return
         viewModelScope.launch {
             transientState.update { it.copy(isLoading = true, pendingImports = emptyList()) }
-            val now = System.currentTimeMillis()
-            val newTracks = pending.mapIndexed { idx, item ->
-                GpxTrack(
-                    id = UUID.randomUUID().toString(),
-                    fileName = item.fileName,
-                    trackName = item.trackName,
-                    creatorRaw = item.creatorRaw,
-                    sourceId = item.selectedSourceId,
-                    recordedAtIso = item.recordedAtIso,
-                    distanceKm = item.distanceKm,
-                    rawPointCount = item.points.size,
-                    points = item.points,
-                    minLat = item.minLat,
-                    maxLat = item.maxLat,
-                    minLon = item.minLon,
-                    maxLon = item.maxLon,
-                    importedAtMillis = now + idx
-                )
+            val result = runCatching {
+                val now = System.currentTimeMillis()
+                val newTracks = pending.mapIndexed { idx, item ->
+                    GpxTrack(
+                        id = UUID.randomUUID().toString(),
+                        fileName = item.fileName,
+                        trackName = item.trackName,
+                        creatorRaw = item.creatorRaw,
+                        sourceId = item.selectedSourceId,
+                        recordedAtIso = item.recordedAtIso,
+                        distanceKm = item.distanceKm,
+                        rawPointCount = item.points.size,
+                        points = item.points,
+                        minLat = item.minLat,
+                        maxLat = item.maxLat,
+                        minLon = item.minLon,
+                        maxLon = item.maxLon,
+                        importedAtMillis = now + idx
+                    )
+                }
+                // Ensure selected sources are visible so newly imported tracks show immediately
+                val selectedSourceIds = newTracks.map { it.sourceId }.toSet()
+                selectedSourceIds.forEach { srcId ->
+                    repository.updateSourceVisibility(srcId, true)
+                }
+                repository.saveTracks(newTracks)
+                newTracks.size
             }
-            // Ensure selected sources are visible so newly imported tracks show immediately
-            val selectedSourceIds = newTracks.map { it.sourceId }.toSet()
-            selectedSourceIds.forEach { srcId ->
-                repository.updateSourceVisibility(srcId, true)
-            }
-            repository.saveTracks(newTracks)
-            transientState.update {
-                it.copy(
-                    isLoading = false,
-                    fitBoundsNonce = it.fitBoundsNonce + 1,
-                    snackbarMessage = "Imported ${newTracks.size} GPX track(s) to map."
-                )
+            result.onSuccess { count ->
+                transientState.update {
+                    it.copy(
+                        isLoading = false,
+                        fitBoundsNonce = it.fitBoundsNonce + 1,
+                        snackbarMessage = "Imported $count GPX track(s) to map."
+                    )
+                }
+            }.onFailure { err ->
+                if (err is CancellationException) throw err
+                transientState.update {
+                    it.copy(
+                        isLoading = false,
+                        snackbarMessage = "Failed to save imported tracks: ${err.localizedMessage ?: "unknown error"}"
+                    )
+                }
             }
         }
     }
@@ -614,13 +650,22 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
     }
 
     private fun resolveFileName(uri: Uri): String? {
-        val resolver = getApplication<Application>().contentResolver
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0) return cursor.getString(idx)
+        return runCatching {
+            val resolver = getApplication<Application>().contentResolver
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) {
+                        val name = cursor.getString(idx)
+                        if (!name.isNullOrBlank()) return@runCatching name
+                    }
+                }
             }
-        }
-        return uri.lastPathSegment?.substringAfterLast('/')
+            uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+    }
+
+    companion object {
+        private const val MAX_DISPLAY_POINTS_PER_TRACK = 10_000
     }
 }

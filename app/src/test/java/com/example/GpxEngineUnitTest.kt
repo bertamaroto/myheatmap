@@ -197,4 +197,37 @@ class GpxEngineUnitTest {
         assertEquals(1, "\"type\": \"Feature\"".toRegex().findAll(mergedGeoJson).count())
         assertTrue(mergedGeoJson.contains("\"type\": \"MultiLineString\""))
     }
+
+    @Test
+    fun `parses GPX with UTF-8 BOM and filters NaN elevation safely`() {
+        val gpxWithBom = "\uFEFF" + """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <gpx version="1.1" creator="Garmin Connect">
+              <trk>
+                <name>BOM Ride</name>
+                <trkseg>
+                  <trkpt lat=" 40.416775 " lon=" -3.703790 "><ele>NaN</ele></trkpt>
+                  <trkpt lat="40.420000" lon="-3.700000"><ele>Infinity</ele></trkpt>
+                  <trkpt lat="40.425000" lon="-3.695000"><ele>655.2</ele></trkpt>
+                </trkseg>
+              </trk>
+            </gpx>
+        """.trimIndent()
+
+        val parsed = GpxXmlParser.parseStream(gpxWithBom.toByteArray(Charsets.UTF_8).inputStream(), "bom_ride.gpx")
+        assertEquals(1, parsed.size)
+        assertEquals(3, parsed[0].points.size)
+        assertEquals(null, parsed[0].points[0].ele)
+        assertEquals(null, parsed[0].points[1].ele)
+        assertEquals(655.2, parsed[0].points[2].ele!!, 1e-6)
+        assertTrue(parsed[0].distanceKm.isFinite())
+
+        val largeList = List(25_000) { idx ->
+            TrackPoint(37.7 + idx * 0.00001, -122.4 + idx * 0.00001)
+        }
+        val decimated = GeoMath.decimateForDisplay(largeList, 10_000)
+        assertEquals(10_000, decimated.size)
+        assertEquals(largeList.first(), decimated.first())
+        assertEquals(largeList.last(), decimated.last())
+    }
 }

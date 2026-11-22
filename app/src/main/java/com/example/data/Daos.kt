@@ -56,6 +56,9 @@ interface TrackDao {
     @Query("UPDATE tracks SET sourceId = :fallbackSourceId WHERE sourceId = :deletedSourceId")
     suspend fun reassignSourceTracks(deletedSourceId: String, fallbackSourceId: String)
 
+    @Query("SELECT id FROM tracks WHERE sourceId = :sourceId")
+    suspend fun getTrackIdsBySource(sourceId: String): List<String>
+
     @Query("DELETE FROM tracks WHERE id = :trackId")
     suspend fun deleteTrack(trackId: String)
 

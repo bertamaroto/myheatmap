@@ -2,6 +2,7 @@ package com.example.domain
 
 import org.xml.sax.Attributes
 import org.xml.sax.helpers.DefaultHandler
+import java.io.BufferedInputStream
 import java.io.InputStream
 import java.util.UUID
 import javax.xml.parsers.SAXParserFactory
@@ -18,13 +19,44 @@ object GpxXmlParser {
         fileName: String,
         availableSources: List<SourceCategory> = SourcePresets.defaultSources
     ): List<PendingImportTrack> {
+        val buffered = stripLeadingBomAndWhitespace(inputStream)
         val factory = SAXParserFactory.newInstance().apply {
             isNamespaceAware = false
+            runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
+            runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
         }
         val parser = factory.newSAXParser()
         val handler = StreamingGpxHandler(fileName, availableSources)
-        parser.parse(inputStream, handler)
+        parser.parse(buffered, handler)
         return handler.results
+    }
+
+    private fun stripLeadingBomAndWhitespace(inputStream: InputStream): InputStream {
+        val bis = BufferedInputStream(inputStream, 16 * 1024)
+        bis.mark(64)
+        val header = ByteArray(3)
+        val read = bis.read(header)
+        if (read == 3 &&
+            header[0] == 0xEF.toByte() &&
+            header[1] == 0xBB.toByte() &&
+            header[2] == 0xBF.toByte()
+        ) {
+            // Consumed UTF-8 BOM; continue from byte 3
+            bis.mark(64)
+        } else {
+            bis.reset()
+        }
+        // Skip any leading ASCII whitespace before '<'
+        while (true) {
+            bis.mark(1)
+            val b = bis.read()
+            if (b == -1) break
+            if (b != ' '.code && b != '\t'.code && b != '\r'.code && b != '\n'.code) {
+                bis.reset()
+                break
+            }
+        }
+        return bis
     }
 
     private class StreamingGpxHandler(
@@ -91,8 +123,8 @@ object GpxXmlParser {
                 }
                 "trkpt", "rtept" -> {
                     inPoint = true
-                    ptLat = attributes.getValue("lat")?.toDoubleOrNull()
-                    ptLon = attributes.getValue("lon")?.toDoubleOrNull()
+                    ptLat = attributes.getValue("lat")?.trim()?.toDoubleOrNull()?.takeIf { it.isFinite() }
+                    ptLon = attributes.getValue("lon")?.trim()?.toDoubleOrNull()?.takeIf { it.isFinite() }
                     ptEle = null
                     ptTime = null
                 }
@@ -132,7 +164,7 @@ object GpxXmlParser {
                     }
                 }
                 "ele" -> {
-                    if (inPoint) ptEle = text.toDoubleOrNull()
+                    if (inPoint) ptEle = text.toDoubleOrNull()?.takeIf { it.isFinite() }
                 }
                 "time" -> {
                     if (inPoint) {
@@ -209,7 +241,7 @@ object GpxXmlParser {
                     detectedSourceId = detectedSource,
                     selectedSourceId = detectedSource,
                     recordedAtIso = firstPointTime,
-                    distanceKm = GeoMath.computeTotalDistanceKm(copiedPoints),
+                    distanceKm = GeoMath.computeTotalDistanceKm(copiedPoints).takeIf { it.isFinite() } ?: 0.0,
                     points = copiedPoints,
                     minLat = minLat,
                     maxLat = maxLat,
