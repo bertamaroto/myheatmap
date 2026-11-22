@@ -94,11 +94,12 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
 
         val summaries = sources.map { src ->
             val srcTracks = groupedBySource[src.id].orEmpty()
+            val visibleSrcTracks = srcTracks.filter { it.isVisible && src.isVisible }
             val rawPts = srcTracks.sumOf { it.rawPointCount }
             val renderedPts = if (settings.rdpEnabled) {
-                srcTracks.sumOf { GeoMath.simplifyRdp(it.points, settings.rdpToleranceMeters.toDouble()).size }
+                visibleSrcTracks.sumOf { GeoMath.simplifyRdp(it.points, settings.rdpToleranceMeters.toDouble()).size }
             } else {
-                rawPts
+                visibleSrcTracks.sumOf { it.rawPointCount }
             }
             SourceSummary(
                 source = src,
@@ -110,7 +111,7 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
         }
 
         val visibleTracks = tracks.filter { track ->
-            sourcesById[track.sourceId]?.isVisible ?: true
+            track.isVisible && (sourcesById[track.sourceId]?.isVisible ?: true)
         }
 
         var visibleRawPts = 0
@@ -324,6 +325,23 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch {
             repository.updateSourceVisibility(sourceId, !current.isVisible)
         }
+    }
+
+    fun toggleTrackVisibility(trackId: String) {
+        val track = uiState.value.tracks.find { it.id == trackId } ?: return
+        viewModelScope.launch {
+            repository.updateTrackVisibility(trackId, !track.isVisible, track.sourceId)
+        }
+    }
+
+    fun setAllVisibility(visible: Boolean) {
+        viewModelScope.launch {
+            repository.setAllVisibility(visible)
+        }
+    }
+
+    fun setMergeExportItems(merge: Boolean) {
+        updateSettings { it.copy(mergeExportItems = merge) }
     }
 
     fun openColorPicker(sourceId: String) {
@@ -540,6 +558,7 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
         val sourcesById = snapshot.sources.associateBy { it.id }
         val rdp = snapshot.settings.rdpEnabled
         val tol = snapshot.settings.rdpToleranceMeters
+        val merge = snapshot.settings.mergeExportItems
         return when (format) {
             ExportFormat.KMZ -> GpxAndGeoJsonExporter.exportGoogleMyMapsKmz(
                 tracks = visibleTracks,
@@ -547,7 +566,8 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
                 simplifyEnabled = rdp,
                 toleranceMeters = tol,
                 trackOpacity = snapshot.settings.trackOpacity,
-                trackWidthPx = snapshot.settings.trackWidthPx
+                trackWidthPx = snapshot.settings.trackWidthPx,
+                mergeAll = merge
             )
             ExportFormat.KML -> GpxAndGeoJsonExporter.exportGoogleMyMapsKml(
                 tracks = visibleTracks,
@@ -555,19 +575,22 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
                 simplifyEnabled = rdp,
                 toleranceMeters = tol,
                 trackOpacity = snapshot.settings.trackOpacity,
-                trackWidthPx = snapshot.settings.trackWidthPx
+                trackWidthPx = snapshot.settings.trackWidthPx,
+                mergeAll = merge
             ).toByteArray(Charsets.UTF_8)
             ExportFormat.GPX -> GpxAndGeoJsonExporter.exportAggregatedGpx(
                 tracks = visibleTracks,
                 sourcesById = sourcesById,
                 simplifyEnabled = rdp,
-                toleranceMeters = tol
+                toleranceMeters = tol,
+                mergeAll = merge
             ).toByteArray(Charsets.UTF_8)
             ExportFormat.GEOJSON -> GpxAndGeoJsonExporter.exportGeoJson(
                 tracks = visibleTracks,
                 sourcesById = sourcesById,
                 simplifyEnabled = rdp,
-                toleranceMeters = tol
+                toleranceMeters = tol,
+                mergeAll = merge
             ).toByteArray(Charsets.UTF_8)
         }
     }
@@ -577,8 +600,10 @@ class TrackAggregatorViewModel(application: Application) : AndroidViewModel(appl
     }
 
     private fun getVisibleTracks(state: MainUiState): List<GpxTrack> {
-        val visibleSourceIds = state.sources.filter { it.isVisible }.map { it.id }.toSet()
-        return state.tracks.filter { it.sourceId in visibleSourceIds }
+        val sourcesById = state.sources.associateBy { it.id }
+        return state.tracks.filter { track ->
+            track.isVisible && (sourcesById[track.sourceId]?.isVisible ?: true)
+        }
     }
 
     private fun updateSettings(transform: (MapSettings) -> MapSettings) {

@@ -18,9 +18,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CallMerge
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Map
@@ -28,17 +31,23 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,11 +57,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.domain.GeoMath
+import com.example.domain.GpxTrack
 import com.example.domain.PendingImportTrack
 import com.example.domain.SourceCategory
 import com.example.ui.theme.SourceSwatchPalette
@@ -434,10 +446,16 @@ fun CreateCustomSourceDialog(
 
 @Composable
 fun ExportOptionsDialog(
+    allTracks: List<GpxTrack>,
+    sources: List<SourceCategory>,
     visibleTrackCount: Int,
     visibleDistanceKm: Double,
     renderedPoints: Int,
     rdpEnabled: Boolean,
+    mergeExportItems: Boolean,
+    onToggleMergeExportItems: (Boolean) -> Unit,
+    onToggleTrackVisibility: (String) -> Unit,
+    onToggleAllVisibility: (Boolean) -> Unit,
     onSaveKmz: () -> Unit,
     onSaveKml: () -> Unit,
     onSaveGpx: () -> Unit,
@@ -447,6 +465,14 @@ fun ExportOptionsDialog(
     onDismiss: () -> Unit
 ) {
     val estimatedKmzKb = ((renderedPoints * 7) / 1024).coerceAtLeast(1)
+    val sourcesById = remember(sources) { sources.associateBy { it.id } }
+    val allChecked = allTracks.isNotEmpty() && visibleTrackCount == allTracks.size
+    val anyChecked = visibleTrackCount > 0
+    val masterState = when {
+        allChecked -> ToggleableState.On
+        anyChecked -> ToggleableState.Indeterminate
+        else -> ToggleableState.Off
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -459,7 +485,12 @@ fun ExportOptionsDialog(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -474,25 +505,209 @@ fun ExportOptionsDialog(
                         Text(
                             text = String.format(
                                 Locale.US,
-                                "%d tracks • %.2f km • %d pts",
+                                "%d/%d tracks • %.2f km • %d pts",
                                 visibleTrackCount,
+                                allTracks.size,
                                 visibleDistanceKm,
                                 renderedPoints
                             ),
                             style = TelemetryMonoStyle,
-                            color = MaterialTheme.colorScheme.secondary
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Est. KMZ size: ~$estimatedKmzKb KB (5 MB Google My Maps limit)" +
-                                if (rdpEnabled) " • RDP active" else "",
+                            text = if (visibleTrackCount == 0) {
+                                "Select at least one track below to export."
+                            } else {
+                                "Est. KMZ size: ~$estimatedKmzKb KB (5 MB Google My Maps limit)" +
+                                    if (rdpEnabled) " • RDP active" else ""
+                            },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (visibleTrackCount == 0) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                }
+
+                // Exported Items Tick-Box Selector
+                if (allTracks.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onToggleAllVisibility(!allChecked) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .testTag("export_toggle_all_row"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TriStateCheckbox(
+                                        state = masterState,
+                                        onClick = { onToggleAllVisibility(!allChecked) },
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = MaterialTheme.colorScheme.primary,
+                                            uncheckedColor = MaterialTheme.colorScheme.onSurface,
+                                            checkmarkColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        modifier = Modifier.testTag("export_toggle_all_checkbox")
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (allChecked) "Hide All Exported Items" else "Show All Exported Items",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = "$visibleTrackCount/${allTracks.size}",
+                                    style = TelemetryMonoStyle,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 8.dp)
+                                )
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+
+                            allTracks.forEach { track ->
+                                val src = sourcesById[track.sourceId]
+                                val dotColor = parseHexColor(src?.colorHex ?: "#E879F9")
+                                val isChecked = track.isVisible && (src?.isVisible ?: true)
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onToggleTrackVisibility(track.id) }
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                        .testTag("export_item_row_${track.id}"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = { onToggleTrackVisibility(track.id) },
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = dotColor,
+                                            uncheckedColor = MaterialTheme.colorScheme.onSurface,
+                                            checkmarkColor = if (dotColor.luminance() > 0.5f) Color.Black else Color.White
+                                        ),
+                                        modifier = Modifier.testTag("export_item_checkbox_${track.id}")
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(dotColor)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = track.trackName,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isChecked) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = String.format(Locale.US, "%.1f km", track.distanceKm),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Merge All Exported Items Option
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (mergeExportItems) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    border = BorderStroke(
+                        width = if (mergeExportItems) 1.5.dp else 1.dp,
+                        color = if (mergeExportItems) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onToggleMergeExportItems(!mergeExportItems) }
+                        .testTag("merge_export_items_row")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.CallMerge,
+                            contentDescription = null,
+                            tint = if (mergeExportItems) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Merge all exported items",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = if (mergeExportItems) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Combine selected tracks into 1 single layer / track",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (mergeExportItems) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                        Switch(
+                            checked = mergeExportItems,
+                            onCheckedChange = onToggleMergeExportItems,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onSecondary,
+                                checkedTrackColor = MaterialTheme.colorScheme.secondary,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.onSurface,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surface,
+                                uncheckedBorderColor = MaterialTheme.colorScheme.outline
+                            ),
+                            modifier = Modifier.testTag("merge_export_items_switch")
                         )
                     }
                 }
 
                 Button(
                     onClick = onSaveKmz,
+                    enabled = visibleTrackCount > 0,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.tertiary,
@@ -510,6 +725,7 @@ fun ExportOptionsDialog(
 
                 OutlinedButton(
                     onClick = onSaveKml,
+                    enabled = visibleTrackCount > 0,
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.65f)),
                     modifier = Modifier
@@ -529,6 +745,7 @@ fun ExportOptionsDialog(
 
                 Button(
                     onClick = onSaveGpx,
+                    enabled = visibleTrackCount > 0,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -546,6 +763,7 @@ fun ExportOptionsDialog(
 
                 OutlinedButton(
                     onClick = onSaveGeoJson,
+                    enabled = visibleTrackCount > 0,
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.65f)),
                     modifier = Modifier
@@ -569,6 +787,7 @@ fun ExportOptionsDialog(
                 ) {
                     OutlinedButton(
                         onClick = onShareKmz,
+                        enabled = visibleTrackCount > 0,
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                         modifier = Modifier
@@ -587,6 +806,7 @@ fun ExportOptionsDialog(
                     }
                     OutlinedButton(
                         onClick = onShareGpx,
+                        enabled = visibleTrackCount > 0,
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                         modifier = Modifier

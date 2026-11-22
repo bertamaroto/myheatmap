@@ -40,7 +40,8 @@ data class GpxTrack(
     val maxLat: Double,
     val minLon: Double,
     val maxLon: Double,
-    val importedAtMillis: Long
+    val importedAtMillis: Long,
+    val isVisible: Boolean = true
 )
 
 data class MapSettings(
@@ -50,7 +51,8 @@ data class MapSettings(
     val trackOpacity: Float = 0.80f,
     val trackWidthPx: Float = 3.5f,
     val rdpEnabled: Boolean = false,
-    val rdpToleranceMeters: Float = 12f
+    val rdpToleranceMeters: Float = 12f,
+    val mergeExportItems: Boolean = false
 )
 
 data class SourceSummary(

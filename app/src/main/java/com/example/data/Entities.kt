@@ -28,7 +28,8 @@ data class TrackEntity(
     val maxLat: Double,
     val minLon: Double,
     val maxLon: Double,
-    val importedAtMillis: Long
+    val importedAtMillis: Long,
+    val isVisible: Boolean = true
 )
 
 @Entity(tableName = "settings")
@@ -40,5 +41,6 @@ data class SettingsEntity(
     val trackOpacity: Float,
     val trackWidthPx: Float,
     val rdpEnabled: Boolean,
-    val rdpToleranceMeters: Float
+    val rdpToleranceMeters: Float,
+    val mergeExportItems: Boolean = false
 )

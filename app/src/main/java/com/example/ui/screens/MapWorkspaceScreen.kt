@@ -152,7 +152,9 @@ fun MapWorkspaceScreen(
                     onImportClick = ::launchImportPicker,
                     onLoadDemoClick = viewModel::loadDemoTracks,
                     onCreateSourceClick = viewModel::openCreateSourceDialog,
+                    onToggleAllVisibility = viewModel::setAllVisibility,
                     onToggleSourceVisibility = viewModel::toggleSourceVisibility,
+                    onToggleTrackVisibility = viewModel::toggleTrackVisibility,
                     onOpenColorPicker = viewModel::openColorPicker,
                     onReassignTrackSource = viewModel::reassignTrackSource,
                     onDeleteTrack = viewModel::deleteTrack,
@@ -196,6 +198,9 @@ fun MapWorkspaceScreen(
                 if (uiState.tracks.isNotEmpty()) {
                     FloatingLegendCard(
                         summaries = uiState.sourceSummaries,
+                        allItemsVisible = uiState.visibleTrackCount == uiState.tracks.size,
+                        anyItemVisible = uiState.visibleTrackCount > 0,
+                        onToggleAllVisibility = viewModel::setAllVisibility,
                         onToggleSource = viewModel::toggleSourceVisibility,
                         onPickColor = viewModel::openColorPicker,
                         modifier = Modifier
@@ -307,7 +312,9 @@ fun MapWorkspaceScreen(
                         viewModel.loadDemoTracks()
                     },
                     onCreateSourceClick = viewModel::openCreateSourceDialog,
+                    onToggleAllVisibility = viewModel::setAllVisibility,
                     onToggleSourceVisibility = viewModel::toggleSourceVisibility,
+                    onToggleTrackVisibility = viewModel::toggleTrackVisibility,
                     onOpenColorPicker = viewModel::openColorPicker,
                     onReassignTrackSource = viewModel::reassignTrackSource,
                     onDeleteTrack = viewModel::deleteTrack,
@@ -356,10 +363,16 @@ fun MapWorkspaceScreen(
 
     if (uiState.showExportDialog) {
         ExportOptionsDialog(
+            allTracks = uiState.tracks,
+            sources = uiState.sources,
             visibleTrackCount = uiState.visibleTrackCount,
             visibleDistanceKm = uiState.visibleDistanceKm,
             renderedPoints = uiState.totalRenderedPoints,
             rdpEnabled = uiState.settings.rdpEnabled,
+            mergeExportItems = uiState.settings.mergeExportItems,
+            onToggleMergeExportItems = viewModel::setMergeExportItems,
+            onToggleTrackVisibility = viewModel::toggleTrackVisibility,
+            onToggleAllVisibility = viewModel::setAllVisibility,
             onSaveKmz = { saveKmzLauncher.launch("trackforge_heatmap.kmz") },
             onSaveKml = { saveKmlLauncher.launch("trackforge_heatmap.kml") },
             onSaveGpx = { saveGpxLauncher.launch("trackforge_aggregated.gpx") },

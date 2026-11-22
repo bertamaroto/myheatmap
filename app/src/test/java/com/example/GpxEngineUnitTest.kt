@@ -160,4 +160,41 @@ class GpxEngineUnitTest {
         val entry = zipStream.nextEntry
         assertEquals("doc.kml", entry?.name)
     }
+
+    @Test
+    fun `mergeAll combines all exported tracks into single GPX track, single KML Placemark, and single GeoJSON MultiLineString`() {
+        val sources = SourcePresets.defaultSources.associateBy { it.id }
+        val demos = DemoTrackGenerator.generateDemoTracks()
+
+        val mergedGpx = GpxAndGeoJsonExporter.exportAggregatedGpx(
+            tracks = demos,
+            sourcesById = sources,
+            simplifyEnabled = true,
+            toleranceMeters = 15f,
+            mergeAll = true
+        )
+        assertEquals(1, "<trk>".toRegex().findAll(mergedGpx).count())
+        assertEquals(demos.size, "<trkseg>".toRegex().findAll(mergedGpx).count())
+
+        val mergedKml = GpxAndGeoJsonExporter.exportGoogleMyMapsKml(
+            tracks = demos,
+            sourcesById = sources,
+            simplifyEnabled = true,
+            toleranceMeters = 15f,
+            mergeAll = true
+        )
+        assertEquals(1, "<Placemark>".toRegex().findAll(mergedKml).count())
+        assertEquals(1, "<MultiGeometry>".toRegex().findAll(mergedKml).count())
+        assertEquals(demos.size, "<LineString>".toRegex().findAll(mergedKml).count())
+
+        val mergedGeoJson = GpxAndGeoJsonExporter.exportGeoJson(
+            tracks = demos,
+            sourcesById = sources,
+            simplifyEnabled = true,
+            toleranceMeters = 15f,
+            mergeAll = true
+        )
+        assertEquals(1, "\"type\": \"Feature\"".toRegex().findAll(mergedGeoJson).count())
+        assertTrue(mergedGeoJson.contains("\"type\": \"MultiLineString\""))
+    }
 }

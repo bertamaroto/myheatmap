@@ -53,7 +53,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -276,12 +278,20 @@ private fun ModeTogglePill(
 @Composable
 fun FloatingLegendCard(
     summaries: List<SourceSummary>,
+    allItemsVisible: Boolean,
+    anyItemVisible: Boolean,
+    onToggleAllVisibility: (Boolean) -> Unit,
     onToggleSource: (String) -> Unit,
     onPickColor: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(true) }
     val activeSummaries = summaries.filter { it.trackCount > 0 }.ifEmpty { summaries }
+    val masterState = when {
+        allItemsVisible -> ToggleableState.On
+        anyItemVisible -> ToggleableState.Indeterminate
+        else -> ToggleableState.Off
+    }
 
     Surface(
         modifier = modifier.widthIn(min = 196.dp, max = 256.dp),
@@ -337,6 +347,38 @@ fun FloatingLegendCard(
                     modifier = Modifier.padding(top = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onToggleAllVisibility(!allItemsVisible) }
+                            .padding(horizontal = 2.dp, vertical = 2.dp)
+                            .testTag("legend_toggle_all_row"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TriStateCheckbox(
+                            state = masterState,
+                            onClick = { onToggleAllVisibility(!allItemsVisible) },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = MaterialTheme.colorScheme.primary,
+                                uncheckedColor = MaterialTheme.colorScheme.onSurface,
+                                checkmarkColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier
+                                .size(34.dp)
+                                .testTag("legend_toggle_all_checkbox")
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (allItemsVisible) "Hide All Items" else "Show All Items",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
                     activeSummaries.forEach { summary ->
                         val src = summary.source
                         val dotColor = parseHexColor(src.colorHex)

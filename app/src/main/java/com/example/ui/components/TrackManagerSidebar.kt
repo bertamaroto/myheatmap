@@ -51,6 +51,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -65,6 +66,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -88,7 +90,9 @@ fun TrackManagerSidebar(
     onImportClick: () -> Unit,
     onLoadDemoClick: () -> Unit,
     onCreateSourceClick: () -> Unit,
+    onToggleAllVisibility: (Boolean) -> Unit,
     onToggleSourceVisibility: (String) -> Unit,
+    onToggleTrackVisibility: (String) -> Unit,
     onOpenColorPicker: (String) -> Unit,
     onReassignTrackSource: (String, String) -> Unit,
     onDeleteTrack: (String) -> Unit,
@@ -99,6 +103,13 @@ fun TrackManagerSidebar(
 ) {
     val tracksBySource = remember(tracks) { tracks.groupBy { it.sourceId } }
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
+    val allItemsVisible = tracks.isNotEmpty() && visibleTrackCount == tracks.size
+    val anyItemsVisible = visibleTrackCount > 0
+    val masterState = when {
+        allItemsVisible -> ToggleableState.On
+        anyItemsVisible -> ToggleableState.Indeterminate
+        else -> ToggleableState.Off
+    }
 
     Surface(
         modifier = modifier.fillMaxHeight(),
@@ -233,6 +244,56 @@ fun TrackManagerSidebar(
                 }
             }
 
+            if (tracks.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onToggleAllVisibility(!allItemsVisible) }
+                        .testTag("sidebar_toggle_all_row")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TriStateCheckbox(
+                                state = masterState,
+                                onClick = { onToggleAllVisibility(!allItemsVisible) },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = MaterialTheme.colorScheme.primary,
+                                    uncheckedColor = MaterialTheme.colorScheme.onSurface,
+                                    checkmarkColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                modifier = Modifier.testTag("sidebar_toggle_all_checkbox")
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (allItemsVisible) "Hide All Exported Items" else "Show All Exported Items",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = "$visibleTrackCount/${tracks.size}",
+                            style = TelemetryMonoStyle,
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(end = 6.dp)
+                        )
+                    }
+                }
+            }
+
             // Grouped Source & File List
             LazyColumn(
                 modifier = Modifier
@@ -253,6 +314,7 @@ fun TrackManagerSidebar(
                         isExpanded = isExpanded,
                         onToggleExpand = { expandedGroups[source.id] = !isExpanded },
                         onToggleVisibility = { onToggleSourceVisibility(source.id) },
+                        onToggleTrackVisibility = onToggleTrackVisibility,
                         onPickColor = { onOpenColorPicker(source.id) },
                         onDeleteSourceTracks = { onDeleteSourceTracks(source.id) },
                         onReassignTrackSource = onReassignTrackSource,
@@ -346,6 +408,7 @@ private fun SourceGroupCard(
     isExpanded: Boolean,
     onToggleExpand: () -> Unit,
     onToggleVisibility: () -> Unit,
+    onToggleTrackVisibility: (String) -> Unit,
     onPickColor: () -> Unit,
     onDeleteSourceTracks: () -> Unit,
     onReassignTrackSource: (String, String) -> Unit,
@@ -460,8 +523,10 @@ private fun SourceGroupCard(
                     tracks.forEach { track ->
                         TrackItemRow(
                             track = track,
+                            sourceVisible = src.isVisible,
                             accentColor = accent,
                             allSources = allSources,
+                            onToggleVisibility = { onToggleTrackVisibility(track.id) },
                             onReassignSource = { newSourceId -> onReassignTrackSource(track.id, newSourceId) },
                             onDelete = { onDeleteTrack(track.id) }
                         )
@@ -475,38 +540,59 @@ private fun SourceGroupCard(
 @Composable
 private fun TrackItemRow(
     track: GpxTrack,
+    sourceVisible: Boolean,
     accentColor: Color,
     allSources: List<SourceCategory>,
+    onToggleVisibility: () -> Unit,
     onReassignSource: (String) -> Unit,
     onDelete: () -> Unit
 ) {
     var showSourceMenu by remember { mutableStateOf(false) }
     val readableAccent = readableOnSurface(accentColor, MaterialTheme.colorScheme.surface)
+    val effectiveVisible = track.isVisible && sourceVisible
 
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (effectiveVisible) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+        )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .clickable(onClick = onToggleVisibility)
+                .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Checkbox(
+                checked = effectiveVisible,
+                onCheckedChange = { onToggleVisibility() },
+                colors = CheckboxDefaults.colors(
+                    checkedColor = accentColor,
+                    uncheckedColor = MaterialTheme.colorScheme.onSurface,
+                    checkmarkColor = if (accentColor.luminance() > 0.5f) Color.Black else Color.White
+                ),
+                modifier = Modifier.testTag("sidebar_track_checkbox_${track.id}")
+            )
             Box(
                 modifier = Modifier
                     .width(4.dp)
                     .height(34.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(accentColor)
+                    .background(if (effectiveVisible) accentColor else accentColor.copy(alpha = 0.35f))
             )
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = track.trackName,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = if (effectiveVisible) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

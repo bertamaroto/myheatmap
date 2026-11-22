@@ -42,6 +42,19 @@ class TrackRepository(
 
     suspend fun updateSourceVisibility(id: String, isVisible: Boolean) = withContext(Dispatchers.IO) {
         sourceDao.updateVisibility(id, isVisible)
+        trackDao.updateVisibilityBySource(id, isVisible)
+    }
+
+    suspend fun updateTrackVisibility(trackId: String, isVisible: Boolean, sourceId: String) = withContext(Dispatchers.IO) {
+        trackDao.updateTrackVisibility(trackId, isVisible)
+        if (isVisible) {
+            sourceDao.updateVisibility(sourceId, true)
+        }
+    }
+
+    suspend fun setAllVisibility(isVisible: Boolean) = withContext(Dispatchers.IO) {
+        sourceDao.setAllVisibility(isVisible)
+        trackDao.setAllVisibility(isVisible)
     }
 
     suspend fun updateSourceColor(id: String, colorHex: String) = withContext(Dispatchers.IO) {
@@ -123,7 +136,8 @@ class TrackRepository(
             maxLat = maxLat,
             minLon = minLon,
             maxLon = maxLon,
-            importedAtMillis = importedAtMillis
+            importedAtMillis = importedAtMillis,
+            isVisible = isVisible
         )
     }
 
@@ -155,7 +169,8 @@ class TrackRepository(
             maxLat = maxLat,
             minLon = minLon,
             maxLon = maxLon,
-            importedAtMillis = importedAtMillis
+            importedAtMillis = importedAtMillis,
+            isVisible = isVisible
         )
     }
 
@@ -169,7 +184,8 @@ class TrackRepository(
             trackOpacity = trackOpacity,
             trackWidthPx = trackWidthPx,
             rdpEnabled = rdpEnabled,
-            rdpToleranceMeters = rdpToleranceMeters
+            rdpToleranceMeters = rdpToleranceMeters,
+            mergeExportItems = mergeExportItems
         )
     }
 
@@ -181,7 +197,8 @@ class TrackRepository(
         trackOpacity = trackOpacity,
         trackWidthPx = trackWidthPx,
         rdpEnabled = rdpEnabled,
-        rdpToleranceMeters = rdpToleranceMeters
+        rdpToleranceMeters = rdpToleranceMeters,
+        mergeExportItems = mergeExportItems
     )
 
     companion object {

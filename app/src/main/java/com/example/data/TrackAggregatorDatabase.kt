@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [SourceEntity::class, TrackEntity::class, SettingsEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class TrackAggregatorDatabase : RoomDatabase() {
@@ -28,6 +28,13 @@ abstract class TrackAggregatorDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tracks ADD COLUMN isVisible INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE settings ADD COLUMN mergeExportItems INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): TrackAggregatorDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -35,7 +42,7 @@ abstract class TrackAggregatorDatabase : RoomDatabase() {
                     TrackAggregatorDatabase::class.java,
                     "trackforge_gpx.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { INSTANCE = it }
             }

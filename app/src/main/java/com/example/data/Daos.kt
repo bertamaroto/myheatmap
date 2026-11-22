@@ -23,6 +23,9 @@ interface SourceDao {
     @Query("UPDATE sources SET isVisible = :isVisible WHERE id = :id")
     suspend fun updateVisibility(id: String, isVisible: Boolean)
 
+    @Query("UPDATE sources SET isVisible = :isVisible")
+    suspend fun setAllVisibility(isVisible: Boolean)
+
     @Query("UPDATE sources SET colorHex = :colorHex WHERE id = :id")
     suspend fun updateColor(id: String, colorHex: String)
 
@@ -40,6 +43,15 @@ interface TrackDao {
 
     @Query("UPDATE tracks SET sourceId = :newSourceId WHERE id = :trackId")
     suspend fun updateTrackSource(trackId: String, newSourceId: String)
+
+    @Query("UPDATE tracks SET isVisible = :isVisible WHERE id = :trackId")
+    suspend fun updateTrackVisibility(trackId: String, isVisible: Boolean)
+
+    @Query("UPDATE tracks SET isVisible = :isVisible WHERE sourceId = :sourceId")
+    suspend fun updateVisibilityBySource(sourceId: String, isVisible: Boolean)
+
+    @Query("UPDATE tracks SET isVisible = :isVisible")
+    suspend fun setAllVisibility(isVisible: Boolean)
 
     @Query("UPDATE tracks SET sourceId = :fallbackSourceId WHERE sourceId = :deletedSourceId")
     suspend fun reassignSourceTracks(deletedSourceId: String, fallbackSourceId: String)
