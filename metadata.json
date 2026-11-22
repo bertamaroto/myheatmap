@@ -1,0 +1,6 @@
+{
+  "name": "TrackForge GPX",
+  "description": "Multi-source GPX heatmap visualizer, track aggregator, and GPX v1.1 / GeoJSON exporter.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

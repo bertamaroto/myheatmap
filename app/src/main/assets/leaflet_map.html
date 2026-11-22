@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>TrackForge Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    html, body, #map {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #F4F7FA;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .leaflet-container {
+      background: #F4F7FA;
+    }
+    body.dark-map, body.dark-map #map, body.dark-map .leaflet-container {
+      background: #0B0F14;
+    }
+    .leaflet-control-attribution {
+      background: rgba(255, 255, 255, 0.82) !important;
+      color: #475569 !important;
+      font-size: 9px !important;
+      padding: 1px 5px !important;
+      border-radius: 4px 0 0 0;
+    }
+    body.dark-map .leaflet-control-attribution {
+      background: rgba(11, 15, 20, 0.72) !important;
+      color: #64748B !important;
+    }
+    .leaflet-control-attribution a {
+      color: #0284C7 !important;
+    }
+    body.dark-map .leaflet-control-attribution a {
+      color: #94A3B8 !important;
+    }
+    .leaflet-popup-content-wrapper {
+      background: #FFFFFF;
+      color: #0F172A;
+      border: 1px solid #CBD5E1;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+    }
+    .leaflet-popup-tip {
+      background: #FFFFFF;
+      border: 1px solid #CBD5E1;
+    }
+    body.dark-map .leaflet-popup-content-wrapper {
+      background: #131A22;
+      color: #F1F5F9;
+      border: 1px solid #263241;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
+    }
+    body.dark-map .leaflet-popup-tip {
+      background: #131A22;
+      border: 1px solid #263241;
+    }
+    .tf-popup-source {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+    .tf-popup-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .tf-popup-meta {
+      font-size: 11px;
+      color: #475569;
+      font-family: monospace;
+    }
+    body.dark-map .tf-popup-meta {
+      color: #94A3B8;
+    }
+    #fallback-canvas {
+      display: none;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      background: #F4F7FA;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <canvas id="fallback-canvas"></canvas>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" crossorigin=""></script>
+  <script>
+    (function () {
+      let map = null;
+      let darkLayer = null;
+      let lightLayer = null;
+      let trackLayerGroup = null;
+      let heatLayer = null;
+      let currentTileStyle = 'LIGHT_STREET';
+      let lastFitNonce = -1;
+      let lastState = null;
+
+      function initLeaflet() {
+        if (typeof L === 'undefined') {
+          document.getElementById('fallback-canvas').style.display = 'block';
+          return false;
+        }
+
+        const canvasRenderer = L.canvas({ padding: 0.5 });
+
+        map = L.map('map', {
+          center: [37.7749, -122.4194],
+          zoom: 12,
+          zoomControl: false,
+          preferCanvas: true,
+          renderer: canvasRenderer
+        });
+
+        darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; OpenStreetMap &copy; CARTO',
+          subdomains: 'abcd',
+          maxZoom: 20
+        });
+
+        lightLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; OpenStreetMap &copy; CARTO',
+          subdomains: 'abcd',
+          maxZoom: 20
+        });
+
+        lightLayer.addTo(map);
+        trackLayerGroup = L.layerGroup().addTo(map);
+        return true;
+      }
+
+      const leafletReady = initLeaflet();
+
+      function escapeHtml(text) {
+        return String(text || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function setTileStyle(style) {
+        const isDark = style === 'DARK_MATTER';
+        document.body.classList.toggle('dark-map', isDark);
+
+        if (!leafletReady) {
+          const canvas = document.getElementById('fallback-canvas');
+          canvas.style.background = isDark ? '#0B0F14' : '#F4F7FA';
+          return;
+        }
+        if (style === currentTileStyle) return;
+        currentTileStyle = style;
+        if (isDark) {
+          if (map.hasLayer(lightLayer)) map.removeLayer(lightLayer);
+          if (!map.hasLayer(darkLayer)) darkLayer.addTo(map);
+        } else {
+          if (map.hasLayer(darkLayer)) map.removeLayer(darkLayer);
+          if (!map.hasLayer(lightLayer)) lightLayer.addTo(map);
+        }
+      }
+
+      function renderFallbackCanvas(payload) {
+        const canvas = document.getElementById('fallback-canvas');
+        const dpr = window.devicePixelRatio || 1;
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        const isDark = payload.tileStyle === 'DARK_MATTER';
+        ctx.fillStyle = isDark ? '#0B0F14' : '#F4F7FA';
+        ctx.fillRect(0, 0, w, h);
+
+        // Subtle grid
+        ctx.strokeStyle = isDark ? 'rgba(148,163,184,0.08)' : 'rgba(15,23,42,0.06)';
+        ctx.lineWidth = 1;
+        for (let x = 0; x < w; x += 40) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        }
+        for (let y = 0; y < h; y += 40) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+        }
+
+        const tracks = payload.tracks || [];
+        if (tracks.length === 0) return;
+
+        let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+        tracks.forEach(t => {
+          (t.pts || []).forEach(p => {
+            if (p[0] < minLat) minLat = p[0];
+            if (p[0] > maxLat) maxLat = p[0];
+            if (p[1] < minLon) minLon = p[1];
+            if (p[1] > maxLon) maxLon = p[1];
+          });
+        });
+
+        const pad = 48;
+        const latSpan = Math.max(0.001, maxLat - minLat);
+        const lonSpan = Math.max(0.001, maxLon - minLon);
+        const scale = Math.min((w - pad * 2) / lonSpan, (h - pad * 2) / latSpan);
+        const offsetX = (w - lonSpan * scale) / 2;
+        const offsetY = (h - latSpan * scale) / 2;
+
+        tracks.forEach(t => {
+          const pts = t.pts || [];
+          if (pts.length < 2) return;
+          ctx.save();
+          ctx.strokeStyle = t.color || '#FF5722';
+          ctx.globalAlpha = payload.opacity || 0.75;
+          ctx.lineWidth = payload.weight || 3;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.beginPath();
+          pts.forEach((p, idx) => {
+            const x = offsetX + (p[1] - minLon) * scale;
+            const y = h - (offsetY + (p[0] - minLat) * scale);
+            if (idx === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+          ctx.restore();
+        });
+      }
+
+      window.updateMapData = function (payload) {
+        if (!payload) return;
+        lastState = payload;
+
+        setTileStyle(payload.tileStyle || 'LIGHT_STREET');
+
+        if (!leafletReady) {
+          renderFallbackCanvas(payload);
+          return;
+        }
+
+        trackLayerGroup.clearLayers();
+        if (heatLayer) {
+          map.removeLayer(heatLayer);
+          heatLayer = null;
+        }
+
+        const tracks = payload.tracks || [];
+        const mode = payload.mode || 'SOURCE_TRACKS';
+        const opacity = typeof payload.opacity === 'number' ? payload.opacity : 0.75;
+        const weight = typeof payload.weight === 'number' ? payload.weight : 3.5;
+
+        const allBounds = [];
+
+        if (mode === 'DENSITY_HEATMAP' && typeof L.heatLayer === 'function') {
+          const heatPoints = [];
+          tracks.forEach(track => {
+            const pts = track.pts || [];
+            for (let i = 0; i < pts.length; i++) {
+              const p = pts[i];
+              heatPoints.push([p[0], p[1], 0.75]);
+              allBounds.push([p[0], p[1]]);
+            }
+          });
+          if (heatPoints.length > 0) {
+            const radius = Math.max(10, Math.round(weight * 4 + 8));
+            const blur = Math.max(12, Math.round(radius * 0.95));
+            heatLayer = L.heatLayer(heatPoints, {
+              radius: radius,
+              blur: blur,
+              maxZoom: 16,
+              minOpacity: Math.max(0.25, opacity * 0.6),
+              gradient: {
+                0.2: '#0ea5e9',
+                0.45: '#22d3ee',
+                0.65: '#a3e635',
+                0.85: '#facc15',
+                1.0: '#ef4444'
+              }
+            }).addTo(map);
+          }
+        } else {
+          // Source-Colored Tracks Mode with outer glow + crisp core polyline
+          tracks.forEach(track => {
+            const pts = track.pts || [];
+            if (pts.length < 2) return;
+
+            for (let i = 0; i < pts.length; i++) {
+              allBounds.push([pts[i][0], pts[i][1]]);
+            }
+
+            // Outer ambient glow stroke for additive overlapping intensity
+            L.polyline(pts, {
+              color: track.color,
+              weight: weight + 4.5,
+              opacity: Math.min(0.32, opacity * 0.30),
+              lineCap: 'round',
+              lineJoin: 'round',
+              interactive: false
+            }).addTo(trackLayerGroup);
+
+            // Core track line with interactive metadata popup
+            const line = L.polyline(pts, {
+              color: track.color,
+              weight: weight,
+              opacity: opacity,
+              lineCap: 'round',
+              lineJoin: 'round'
+            });
+
+            const popupHtml =
+              '<div class="tf-popup-source" style="color:' + escapeHtml(track.color) + '">' +
+              escapeHtml(track.sourceName) +
+              '</div>' +
+              '<div class="tf-popup-title">' + escapeHtml(track.trackName) + '</div>' +
+              '<div class="tf-popup-meta">' +
+              escapeHtml(track.distanceLabel) + ' &bull; ' + escapeHtml(track.pointCountLabel) +
+              (track.dateLabel ? '<br/>' + escapeHtml(track.dateLabel) : '') +
+              '</div>';
+
+            line.bindPopup(popupHtml);
+            line.addTo(trackLayerGroup);
+          });
+        }
+
+        if (payload.fitBoundsNonce !== undefined && payload.fitBoundsNonce !== lastFitNonce) {
+          lastFitNonce = payload.fitBoundsNonce;
+          if (allBounds.length > 0) {
+            const bounds = L.latLngBounds(allBounds);
+            if (bounds.isValid()) {
+              map.fitBounds(bounds, { padding: [44, 44], maxZoom: 15, animate: true });
+            }
+          }
+        }
+      };
+
+      window.addEventListener('resize', function () {
+        if (leafletReady && map) {
+          map.invalidateSize();
+        } else if (lastState) {
+          renderFallbackCanvas(lastState);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

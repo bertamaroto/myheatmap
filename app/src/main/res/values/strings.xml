@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">TrackForge GPX</string>
+    <string name="cd_toggle_sidebar">Toggle track manager panel</string>
+    <string name="cd_recenter_map">Recenter map to visible tracks</string>
+    <string name="cd_toggle_map_theme">Toggle dark and light map tiles</string>
+    <string name="cd_import_gpx">Import GPX files</string>
+    <string name="cd_export_gpx">Export aggregated GPX</string>
+    <string name="cd_export_geojson">Export GeoJSON</string>
+    <string name="cd_delete_track">Delete track</string>
+    <string name="cd_delete_source">Delete all tracks in source</string>
+    <string name="cd_color_picker">Customize source color</string>
+    <string name="cd_toggle_legend">Toggle floating legend</string>
+</resources>
